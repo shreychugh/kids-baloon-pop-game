@@ -11,6 +11,8 @@ const BalloonGame = ({ onHome }) => {
   const [gameStarted, setGameStarted] = useState(false);
   const [gameSize, setGameSize] = useState({ width: 0, height: 0 });
   const gameAreaRef = useRef(null);
+  const spawnIntervalRef = useRef(null);
+  const moveIntervalRef = useRef(null);
 
   // Initialize game area size
   useEffect(() => {
@@ -20,38 +22,41 @@ const BalloonGame = ({ onHome }) => {
         setGameSize({ width: rect.width, height: rect.height });
       }
     };
-
+    
     updateSize();
     window.addEventListener('resize', updateSize);
     return () => window.removeEventListener('resize', updateSize);
   }, []);
 
-  // Timer
+  // Game timer
   useEffect(() => {
+    let timer;
     if (gameStarted && !gameOver && timeLeft > 0) {
-      const timer = setInterval(() => {
-        setTimeLeft(prev => prev - 1);
+      timer = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            setGameOver(true);
+            return 0;
+          }
+          return prev - 1;
+        });
       }, 1000);
-
-      if (timeLeft === 0) {
-        setGameOver(true);
-      }
-
-      return () => clearInterval(timer);
     }
+    return () => clearInterval(timer);
   }, [gameStarted, gameOver, timeLeft]);
 
   // Create balloon
   const createBalloon = () => {
     if (!gameSize.width || !gameSize.height) return null;
-    
+
     const size = 30;
     const isSpecial = Math.random() < 0.15;
+    const xPosition = Math.random() * (gameSize.width - size * 2) + size;
     
     return {
       id: Date.now() + Math.random(),
-      x: Math.random() * (gameSize.width - size * 2) + size,
-      y: gameSize.height,
+      x: xPosition,
+      y: gameSize.height + size,
       size,
       speed: 1,
       color: isSpecial ? '#FFD700' : '#FF6B6B',
@@ -63,48 +68,55 @@ const BalloonGame = ({ onHome }) => {
   // Spawn balloons
   useEffect(() => {
     if (!gameStarted || gameOver || !gameSize.width) return;
+    
+    const spawnBalloon = () => {
+      setBalloons(prev => {
+        if (prev.length >= 5) return prev;
+        const newBalloon = createBalloon();
+        return newBalloon ? [...prev, newBalloon] : prev;
+      });
+    };
 
-    const spawnInterval = setInterval(() => {
-      const newBalloon = createBalloon();
-      if (newBalloon) {
-        setBalloons(prev => {
-          if (prev.length >= 5) return prev;
-          return [...prev, newBalloon];
-        });
+    spawnIntervalRef.current = setInterval(spawnBalloon, 1500);
+    return () => {
+      if (spawnIntervalRef.current) {
+        clearInterval(spawnIntervalRef.current);
       }
-    }, 1500);
-
-    return () => clearInterval(spawnInterval);
+    };
   }, [gameStarted, gameOver, gameSize]);
 
   // Move balloons
   useEffect(() => {
     if (!gameStarted || gameOver) return;
 
-    const moveInterval = setInterval(() => {
+    moveIntervalRef.current = setInterval(() => {
       setBalloons(prev => {
-        return prev
-          .map(balloon => ({
-            ...balloon,
-            y: balloon.y - balloon.speed
-          }))
-          .filter(balloon => {
-            if (balloon.y + balloon.size < 0) {
-              if (!balloon.isSpecial) {
-                setLives(l => {
-                  const newLives = l - 1;
-                  if (newLives <= 0) setGameOver(true);
-                  return newLives;
-                });
-              }
-              return false;
+        return prev.map(balloon => ({
+          ...balloon,
+          y: balloon.y - balloon.speed
+        })).filter(balloon => {
+          if (balloon.y + balloon.size < 0) {
+            if (!balloon.isSpecial) {
+              setLives(l => {
+                const newLives = l - 1;
+                if (newLives <= 0) {
+                  setGameOver(true);
+                }
+                return newLives;
+              });
             }
-            return true;
-          });
+            return false;
+          }
+          return true;
+        });
       });
-    }, 16); // 60 FPS
+    }, 16);
 
-    return () => clearInterval(moveInterval);
+    return () => {
+      if (moveIntervalRef.current) {
+        clearInterval(moveIntervalRef.current);
+      }
+    };
   }, [gameStarted, gameOver]);
 
   const handlePop = (balloonId) => {
@@ -135,6 +147,7 @@ const BalloonGame = ({ onHome }) => {
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-100 to-purple-100 p-4">
       <div className="max-w-4xl mx-auto">
+        {/* Header with controls */}
         <div className="flex justify-between items-center mb-4">
           <button
             className="p-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600"
@@ -161,10 +174,12 @@ const BalloonGame = ({ onHome }) => {
           </div>
         </div>
 
+        {/* Game Area */}
         <Card 
           ref={gameAreaRef}
           className="relative h-96 bg-white overflow-hidden"
         >
+          {/* Game States */}
           {!gameStarted ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-50">
               <h2 className="text-3xl font-bold text-white mb-4">Balloon Pop!</h2>
@@ -187,6 +202,7 @@ const BalloonGame = ({ onHome }) => {
               </button>
             </div>
           ) : (
+            /* Active Game */
             <div className="absolute inset-0">
               {balloons.map(balloon => (
                 <div
