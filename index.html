@@ -1,378 +1,236 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card } from '@/components/ui/card';
-import { Paintbrush, Circle, Eraser, Home, Download, Undo, Redo } from 'lucide-react';
+import { Home, Star, Heart, Timer } from 'lucide-react';
 
-function KidsGamesHub() {
-  const [currentGame, setCurrentGame] = React.useState('home');
-  const [selectedColor, setSelectedColor] = React.useState('#FF0000');
-  const [selectedTemplate, setSelectedTemplate] = React.useState('car');
-  const [paths, setPaths] = React.useState([]);
-  const [redoStack, setRedoStack] = React.useState([]);
-  const [currentPath, setCurrentPath] = React.useState([]);
-  const [isDrawing, setIsDrawing] = React.useState(false);
-  const [brushSize, setBrushSize] = React.useState(3);
-  const [balloons, setBalloons] = React.useState([]);
-  const [score, setScore] = React.useState(0);
-  const svgRef = React.useRef(null);
+const BalloonGame = ({ onHome }) => {
+  const [score, setScore] = useState(0);
+  const [lives, setLives] = useState(3);
+  const [gameOver, setGameOver] = useState(false);
+  const [balloons, setBalloons] = useState([]);
+  const [timeLeft, setTimeLeft] = useState(120);
+  const [gameStarted, setGameStarted] = useState(false);
+  const [gameSize, setGameSize] = useState({ width: 0, height: 0 });
+  const gameAreaRef = useRef(null);
 
-  const colors = [
-    '#FF0000', '#FF4500', '#FFA500', '#FFD700', '#00FF00', 
-    '#00FFFF', '#0000FF', '#800080', '#FF00FF', '#FFC0CB',
-    '#8B4513', '#000000', '#696969', '#FFFFFF'
-  ];
+  // Initialize game area size
+  useEffect(() => {
+    const updateSize = () => {
+      if (gameAreaRef.current) {
+        const rect = gameAreaRef.current.getBoundingClientRect();
+        setGameSize({ width: rect.width, height: rect.height });
+      }
+    };
 
-  // Balloon game logic remains the same
-  React.useEffect(() => {
-    if (currentGame === 'balloon') {
-      const interval = setInterval(() => {
-        if (balloons.length < 5) {
-          const newBalloon = {
-            id: Date.now(),
-            x: Math.random() * 700 + 50,
-            y: 600,
-            color: colors[Math.floor(Math.random() * colors.length)],
-            speed: Math.random() * 2 + 1
-          };
-          setBalloons(prev => [...prev, newBalloon]);
-        }
-      }, 2000);
+    updateSize();
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
+  }, []);
 
-      return () => clearInterval(interval);
+  // Timer
+  useEffect(() => {
+    if (gameStarted && !gameOver && timeLeft > 0) {
+      const timer = setInterval(() => {
+        setTimeLeft(prev => prev - 1);
+      }, 1000);
+
+      if (timeLeft === 0) {
+        setGameOver(true);
+      }
+
+      return () => clearInterval(timer);
     }
-  }, [currentGame, balloons.length]);
+  }, [gameStarted, gameOver, timeLeft]);
 
-  React.useEffect(() => {
-    if (currentGame === 'balloon') {
-      let animationFrameId;
-      
-      const animate = () => {
-        setBalloons(prev => 
-          prev.map(balloon => ({
+  // Create balloon
+  const createBalloon = () => {
+    if (!gameSize.width || !gameSize.height) return null;
+    
+    const size = 30;
+    const isSpecial = Math.random() < 0.15;
+    
+    return {
+      id: Date.now() + Math.random(),
+      x: Math.random() * (gameSize.width - size * 2) + size,
+      y: gameSize.height,
+      size,
+      speed: 1,
+      color: isSpecial ? '#FFD700' : '#FF6B6B',
+      isSpecial,
+      points: isSpecial ? 5 : 1
+    };
+  };
+
+  // Spawn balloons
+  useEffect(() => {
+    if (!gameStarted || gameOver || !gameSize.width) return;
+
+    const spawnInterval = setInterval(() => {
+      const newBalloon = createBalloon();
+      if (newBalloon) {
+        setBalloons(prev => {
+          if (prev.length >= 5) return prev;
+          return [...prev, newBalloon];
+        });
+      }
+    }, 1500);
+
+    return () => clearInterval(spawnInterval);
+  }, [gameStarted, gameOver, gameSize]);
+
+  // Move balloons
+  useEffect(() => {
+    if (!gameStarted || gameOver) return;
+
+    const moveInterval = setInterval(() => {
+      setBalloons(prev => {
+        return prev
+          .map(balloon => ({
             ...balloon,
             y: balloon.y - balloon.speed
-          })).filter(balloon => balloon.y > -50)
-        );
-        animationFrameId = requestAnimationFrame(animate);
-      };
-      
-      animationFrameId = requestAnimationFrame(animate);
-      return () => cancelAnimationFrame(animationFrameId);
-    }
-  }, [currentGame]);
+          }))
+          .filter(balloon => {
+            if (balloon.y + balloon.size < 0) {
+              if (!balloon.isSpecial) {
+                setLives(l => {
+                  const newLives = l - 1;
+                  if (newLives <= 0) setGameOver(true);
+                  return newLives;
+                });
+              }
+              return false;
+            }
+            return true;
+          });
+      });
+    }, 16); // 60 FPS
 
-  const popBalloon = (id) => {
-    setBalloons(prev => prev.filter(balloon => balloon.id !== id));
-    setScore(prev => prev + 1);
+    return () => clearInterval(moveInterval);
+  }, [gameStarted, gameOver]);
+
+  const handlePop = (balloonId) => {
+    setBalloons(prev => {
+      const balloon = prev.find(b => b.id === balloonId);
+      if (balloon) {
+        setScore(s => s + balloon.points);
+      }
+      return prev.filter(b => b.id !== balloonId);
+    });
   };
 
-  // Enhanced drawing logic
-  const getMousePosition = (e) => {
-    const svg = svgRef.current;
-    if (!svg) return null;
-    
-    const CTM = svg.getScreenCTM();
-    if (!CTM) return null;
-
-    const rect = svg.getBoundingClientRect();
-    const x = (e.clientX - rect.left) * (800 / rect.width);
-    const y = (e.clientY - rect.top) * (600 / rect.height);
-    
-    return { x, y };
+  const startGame = () => {
+    setGameStarted(true);
+    setScore(0);
+    setLives(3);
+    setTimeLeft(120);
+    setBalloons([]);
+    setGameOver(false);
   };
 
-  const handleStartDrawing = (e) => {
-    const position = getMousePosition(e);
-    if (!position) return;
-    
-    setIsDrawing(true);
-    setCurrentPath([`M ${position.x} ${position.y}`]);
-  };
-
-  const handleDraw = (e) => {
-    if (!isDrawing) return;
-    
-    const position = getMousePosition(e);
-    if (!position) return;
-    
-    setCurrentPath(prev => [...prev, `L ${position.x} ${position.y}`]);
-  };
-
-  const handleEndDrawing = () => {
-    if (!isDrawing) return;
-    const newPath = { path: currentPath.join(' '), color: selectedColor, size: brushSize };
-    setPaths(prev => [...prev, newPath]);
-    setRedoStack([]); // Clear redo stack when new drawing is made
-    setCurrentPath([]);
-    setIsDrawing(false);
-  };
-
-  const handleUndo = () => {
-    if (paths.length === 0) return;
-    const lastPath = paths[paths.length - 1];
-    setPaths(prev => prev.slice(0, -1));
-    setRedoStack(prev => [...prev, lastPath]);
-  };
-
-  const handleRedo = () => {
-    if (redoStack.length === 0) return;
-    const pathToRedo = redoStack[redoStack.length - 1];
-    setRedoStack(prev => prev.slice(0, -1));
-    setPaths(prev => [...prev, pathToRedo]);
-  };
-
-  const handleClearCanvas = () => {
-    setPaths([]);
-    setRedoStack([]);
-  };
-
-  const handleDownload = () => {
-    const svg = svgRef.current;
-    if (!svg) return;
-    const serializer = new XMLSerializer();
-    const source = serializer.serializeToString(svg);
-    const blob = new Blob([source], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'my-drawing.svg';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const templates = {
-    car: (
-      <>
-        <text x="250" y="100" fontSize="48" fontFamily="Arial" fill="black">
-          READY SET RACE!
-        </text>
-        <path
-          d="M100,400 C200,380 400,380 600,400"
-          stroke="black"
-          strokeWidth="2"
-          fill="none"
-        />
-        <path
-          d="M250,300 C300,300 350,280 400,280 C450,280 500,300 550,300"
-          stroke="black"
-          strokeWidth="2"
-          fill="none"
-        />
-        <circle cx="300" cy="320" r="20" stroke="black" strokeWidth="2" fill="none" />
-        <circle cx="500" cy="320" r="20" stroke="black" strokeWidth="2" fill="none" />
-      </>
-    ),
-    rocket: (
-      <>
-        <text x="250" y="100" fontSize="48" fontFamily="Arial" fill="black">
-          SPACE ADVENTURE!
-        </text>
-        <path
-          d="M400,150 L450,350 L350,350 Z"
-          stroke="black"
-          strokeWidth="2"
-          fill="none"
-        />
-        <circle cx="400" cy="250" r="25" stroke="black" strokeWidth="2" fill="none" />
-      </>
-    )
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-100 to-purple-100">
-      <div className="container mx-auto p-8">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-purple-600 mb-4">
-            Kids Fun Zone! 🎨
-          </h1>
+    <div className="min-h-screen bg-gradient-to-b from-blue-100 to-purple-100 p-4">
+      <div className="max-w-4xl mx-auto">
+        <div className="flex justify-between items-center mb-4">
+          <button
+            className="p-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600"
+            onClick={onHome}
+          >
+            <Home className="w-6 h-6" />
+          </button>
+          <div className="flex gap-4 items-center">
+            <div className="flex items-center gap-2 text-xl font-bold text-purple-600">
+              <Timer className="w-6 h-6" />
+              {formatTime(timeLeft)}
+            </div>
+            <div className="text-xl font-bold text-purple-600">
+              Score: {score}
+            </div>
+            <div className="flex gap-1">
+              {[...Array(lives)].map((_, i) => (
+                <Heart 
+                  key={i} 
+                  className="w-6 h-6 text-red-500 fill-current"
+                />
+              ))}
+            </div>
+          </div>
         </div>
 
-        {currentGame === 'home' && (
-          <div className="grid grid-cols-2 gap-8 max-w-4xl mx-auto">
-            <button
-              className="h-48 rounded-xl bg-gradient-to-r from-pink-400 to-purple-400 text-white p-6 flex flex-col items-center justify-center transform hover:scale-105 transition-transform"
-              onClick={() => {
-                setCurrentGame('balloon');
-                setScore(0);
-                setBalloons([]);
-              }}
-            >
-              <Circle className="w-16 h-16 mb-4" />
-              <span className="text-2xl font-bold">Balloon Pop!</span>
-            </button>
-            <button
-              className="h-48 rounded-xl bg-gradient-to-r from-blue-400 to-green-400 text-white p-6 flex flex-col items-center justify-center transform hover:scale-105 transition-transform"
-              onClick={() => setCurrentGame('coloring')}
-            >
-              <Paintbrush className="w-16 h-16 mb-4" />
-              <span className="text-2xl font-bold">Coloring Fun!</span>
-            </button>
-          </div>
-        )}
-
-        {currentGame === 'balloon' && (
-          <div className="w-full max-w-4xl mx-auto">
-            <div className="flex justify-between mb-4">
+        <Card 
+          ref={gameAreaRef}
+          className="relative h-96 bg-white overflow-hidden"
+        >
+          {!gameStarted ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-50">
+              <h2 className="text-3xl font-bold text-white mb-4">Balloon Pop!</h2>
               <button
-                className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600"
-                onClick={() => setCurrentGame('home')}
+                className="px-6 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600"
+                onClick={startGame}
               >
-                <Home className="w-6 h-6" />
+                Start Game
               </button>
-              <div className="text-2xl font-bold text-purple-600">
-                Score: {score}
-              </div>
             </div>
-            
-            <Card className="p-4 relative h-[600px] overflow-hidden">
-              <svg viewBox="0 0 800 600" className="w-full h-full">
-                {balloons.map(balloon => (
-                  <g key={balloon.id} transform={`translate(${balloon.x}, ${balloon.y})`}>
-                    <circle
-                      r="30"
-                      fill={balloon.color}
-                      onClick={() => popBalloon(balloon.id)}
-                      className="cursor-pointer hover:opacity-90 transition-opacity"
-                    />
-                    <path
-                      d="M0,30 L0,60"
-                      stroke="black"
-                      strokeWidth="2"
-                    />
-                  </g>
-                ))}
-              </svg>
-            </Card>
-          </div>
-        )}
-
-        {currentGame === 'coloring' && (
-          <div className="w-full max-w-4xl mx-auto">
-            <div className="flex justify-between mb-4">
+          ) : gameOver ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-50">
+              <h2 className="text-3xl font-bold text-white mb-4">Game Over!</h2>
+              <p className="text-2xl text-white mb-4">Final Score: {score}</p>
               <button
-                className="px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600"
-                onClick={() => setCurrentGame('home')}
+                className="px-6 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600"
+                onClick={startGame}
               >
-                <Home className="w-6 h-6" />
+                Play Again
               </button>
-              <div className="text-2xl font-bold text-purple-600">Coloring Fun!</div>
             </div>
-            
-            <Card className="p-4">
-              <div className="flex justify-between mb-4">
-                <div className="flex gap-4 items-center">
-                  <div className="grid grid-cols-7 gap-2">
-                    {colors.map((color) => (
-                      <button
-                        key={color}
-                        className={`w-8 h-8 rounded-full border-2 ${
-                          selectedColor === color ? 'border-black' : 'border-gray-300'
-                        } hover:scale-110 transition-transform`}
-                        style={{ backgroundColor: color }}
-                        onClick={() => setSelectedColor(color)}
+          ) : (
+            <div className="absolute inset-0">
+              {balloons.map(balloon => (
+                <div
+                  key={balloon.id}
+                  className="absolute cursor-pointer transition-transform hover:scale-110"
+                  style={{
+                    left: `${balloon.x}px`,
+                    top: `${balloon.y}px`,
+                    transform: 'translate(-50%, -50%)',
+                  }}
+                  onClick={() => handlePop(balloon.id)}
+                >
+                  {balloon.isSpecial ? (
+                    <Star 
+                      className="w-12 h-12"
+                      style={{ color: balloon.color }}
+                    />
+                  ) : (
+                    <>
+                      <div
+                        className="rounded-full"
+                        style={{
+                          width: `${balloon.size * 2}px`,
+                          height: `${balloon.size * 2}px`,
+                          backgroundColor: balloon.color,
+                        }}
                       />
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-gray-600">Brush Size:</span>
-                    <input
-                      type="range"
-                      min="1"
-                      max="20"
-                      value={brushSize}
-                      onChange={(e) => setBrushSize(Number(e.target.value))}
-                      className="w-24"
-                    />
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button 
-                    className="p-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50"
-                    onClick={handleUndo}
-                    disabled={paths.length === 0}
-                  >
-                    <Undo className="w-6 h-6" />
-                  </button>
-                  <button 
-                    className="p-2 bg-gray-200 rounded-lg hover:bg-gray-300 disabled:opacity-50"
-                    onClick={handleRedo}
-                    disabled={redoStack.length === 0}
-                  >
-                    <Redo className="w-6 h-6" />
-                  </button>
-                  <button 
-                    className="p-2 bg-gray-200 rounded-lg hover:bg-gray-300"
-                    onClick={handleClearCanvas}
-                  >
-                    <Eraser className="w-6 h-6" />
-                  </button>
-                  <button 
-                    className="p-2 bg-gray-200 rounded-lg hover:bg-gray-300"
-                    onClick={handleDownload}
-                  >
-                    <Download className="w-6 h-6" />
-                  </button>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-lg overflow-hidden relative">
-                {/* Template layer (bottom) */}
-                <svg 
-                  viewBox="0 0 800 600" 
-                  className="w-full h-[500px] absolute top-0 left-0"
-                  style={{ backgroundColor: 'white' }}
-                >
-                  {templates[selectedTemplate]}
-                </svg>
-                
-                {/* Drawing layer (top) */}
-                <svg 
-                  ref={svgRef}
-                  viewBox="0 0 800 600" 
-                  className="w-full h-[500px] border border-gray-200 touch-none relative z-10"
-                  style={{ backgroundColor: 'transparent' }}
-                  onMouseDown={handleStartDrawing}
-                  onMouseMove={handleDraw}
-                  onMouseUp={handleEndDrawing}
-                  onMouseLeave={handleEndDrawing}
-                >
-                  {paths.map((pathData, index) => (
-                    <path
-                      key={index}
-                      d={pathData.path}
-                      stroke={pathData.color}
-                      strokeWidth={pathData.size}
-                      fill="none"
-                    />
-                  ))}
-                  {currentPath.length > 0 && (
-                    <path
-                      d={currentPath.join(' ')}
-                      stroke={selectedColor}
-                      strokeWidth={brushSize}
-                      fill="none"
-                    />
+                      <div
+                        className="absolute left-1/2 w-1 h-8 bg-gray-800"
+                        style={{
+                          transform: 'translateX(-50%)',
+                          top: `${balloon.size * 2}px`,
+                        }}
+                      />
+                    </>
                   )}
-                </svg>
-              </div>
-
-              <div className="mt-4 flex justify-between">
-                <select 
-                  className="px-4 py-2 border rounded-lg"
-                  value={selectedTemplate}
-                  onChange={(e) => setSelectedTemplate(e.target.value)}
-                >
-                  <option value="car">Racing Car</option>
-                  <option value="rocket">Rocket Ship</option>
-                </select>
-              </div>
-            </Card>
-          </div>
-        )}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
       </div>
     </div>
   );
-}
+};
 
-export default KidsGamesHub;
+export default BalloonGame;
